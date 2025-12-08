@@ -17,7 +17,7 @@ ITEM_ID       = os.getenv("ITEM_ID")
 SMTP_SERVER   = os.getenv("SMTP_SERVER")     
 SMTP_PORT     = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER     = os.getenv("SMTP_USER")      
-SMTP_PASS     = os.getenv("SMTP_PASS")      
+SMTP_PASS     = os.getenv("SMTP_PASS")     
 TO_EMAILS     = [e.strip() for e in os.getenv("TO_EMAILS", "").split(",") if e.strip()]
 
 
@@ -114,7 +114,7 @@ def read_saldo_atual() -> float:
     return saldo
 
 
-# ========= CARREGAR MOVBANK (COM DEBUG DE DATAS) =========
+# ========= CARREGAR MOVBANK (COM DATAS DE VECTO E PGTO) =========
 
 def load_movbank() -> pd.DataFrame:
     df = read_table("movbank").copy()
@@ -126,9 +126,8 @@ def load_movbank() -> pd.DataFrame:
 
     df["VALOR"] = pd.to_numeric(df["VALOR"], errors="coerce")
 
-    # VECTO pode vir como número (serial Excel) ou texto (dd/mm/aaaa)
+    # --- Vencimento (VECTO -> VECTO_DT) ---
     df["VECTO_NUM"] = pd.to_numeric(df["VECTO"], errors="coerce")
-
     mask_na = df["VECTO_NUM"].isna()
     if mask_na.any():
         print(f"[DEBUG] {mask_na.sum()} linhas com VECTO não numérico, tentando parse de data texto...")
@@ -138,11 +137,31 @@ def load_movbank() -> pd.DataFrame:
 
     df["VECTO_DT"] = pd.to_datetime("1899-12-30") + pd.to_timedelta(df["VECTO_NUM"], unit="D")
 
+    # --- Data de pagamento (data de pgto -> PGTO_DT) ---
+    if "data de pgto" in df.columns:
+        df["PGTO_NUM"] = pd.to_numeric(df["data de pgto"], errors="coerce")
+        mask_pg_na = df["PGTO_NUM"].isna()
+        if mask_pg_na.any():
+            print(f"[DEBUG] {mask_pg_na.sum()} linhas com 'data de pgto' não numérica, tentando parse de texto...")
+            dt_pg_txt = pd.to_datetime(df.loc[mask_pg_na, "data de pgto"], dayfirst=True, errors="coerce")
+            num_from_txt_pg = (dt_pg_txt - pd.to_datetime("1899-12-30")).dt.days
+            df.loc[mask_pg_na, "PGTO_NUM"] = num_from_txt_pg
+
+        df["PGTO_DT"] = pd.to_datetime("1899-12-30") + pd.to_timedelta(df["PGTO_NUM"], unit="D")
+    else:
+        df["PGTO_DT"] = pd.NaT
+        df["PGTO_DT"] = pd.to_datetime(df["PGTO_DT"])
+
+    # --- DATA_REF: data usada para os lembretes (pgto se existir, senão vencimento) ---
+    df["DATA_REF"] = df["PGTO_DT"].where(df["PGTO_DT"].notna(), df["VECTO_DT"])
+
     try:
-        print("[DEBUG] Amostra VECTO / VECTO_NUM / VECTO_DT / STATUS:")
-        print(df[["VECTO", "VECTO_NUM", "VECTO_DT", "STATUS"]].head(10))
+        print("[DEBUG] Amostra VECTO / VECTO_DT / PGTO_DT / DATA_REF / STATUS:")
+        print(df[["VECTO", "VECTO_DT", "data de pgto", "PGTO_DT", "DATA_REF", "STATUS"]].head(10))
         print("[DEBUG] Intervalo de VECTO_DT:",
               df["VECTO_DT"].min(), "->", df["VECTO_DT"].max())
+        print("[DEBUG] Intervalo de DATA_REF:",
+              df["DATA_REF"].min(), "->", df["DATA_REF"].max())
     except Exception as e:
         print("[DEBUG] erro ao imprimir amostra de datas:", e)
 
@@ -187,21 +206,30 @@ def render_table(df: pd.DataFrame) -> str:
     rows_html = []
     for i, (_, r) in enumerate(df.iterrows()):
         bg = "#ffffff" if i % 2 == 0 else "#f3f4f6"
-        data = (
+
+        venc = (
             r["VECTO_DT"].date().strftime("%d/%m/%Y")
             if pd.notna(r.get("VECTO_DT"))
             else ""
         )
+        pgto = (
+            r["PGTO_DT"].date().strftime("%d/%m/%Y")
+            if pd.notna(r.get("PGTO_DT"))
+            else ""
+        )
+
         rows_html.append(
             "<tr style='background:{bg}'>"
-            "<td style='padding:6px;text-align:left'>{data}</td>"
+            "<td style='padding:6px;text-align:left'>{venc}</td>"
+            "<td style='padding:6px;text-align:left'>{pgto}</td>"
             "<td style='padding:6px;text-align:left'>{desc}</td>"
             "<td style='padding:6px;text-align:left'>{forn}</td>"
             "<td style='padding:6px;text-align:left'>{valor}</td>"
             "<td style='padding:6px;text-align:left'>{status}</td>"
             "</tr>".format(
                 bg=bg,
-                data=data,
+                venc=venc,
+                pgto=pgto,
                 desc=r.get("DESCRIÇÃO", ""),
                 forn=r.get("FORNECEDOR", ""),
                 valor=brl(r.get("VALOR")),
@@ -214,6 +242,7 @@ def render_table(df: pd.DataFrame) -> str:
         "<thead>"
         "<tr style='background:#0b2545;color:#fff'>"
         "<th style='padding:8px;text-align:left'>Vencimento</th>"
+        "<th style='padding:8px;text-align:left'>Pagamento</th>"
         "<th style='padding:8px;text-align:left'>Descrição</th>"
         "<th style='padding:8px;text-align:left'>Fornecedor</th>"
         "<th style='padding:8px;text-align:left'>Valor</th>"
@@ -247,9 +276,9 @@ def resumo_diario_html(saldo_atual_ajustado: float,
                        total_hoje: float,
                        total_atraso: float) -> str:
     """
-    saldo_atual_ajustado já inclui de volta o valor das contas de hoje que
+    saldo_atual_ajustado já inclui de volta o valor das contas do dia que
     estão marcadas como PAGO na planilha, para o e-mail enxergar essas
-    contas como 'a pagar' no dia.
+    contas como fluxo de hoje.
     """
     saldo_pos_dia = saldo_atual_ajustado - total_hoje
 
@@ -300,8 +329,9 @@ def html_diario(hoje,
                 resumo_html: str) -> str:
 
     subt = (
-        f"Contas que vencem hoje ({hoje.strftime('%d/%m/%Y')}) consideradas para o fluxo de caixa, "
-        f"tratando contas já pagas hoje como agendadas neste resumo."
+        f"Contas previstas para hoje ({hoje.strftime('%d/%m/%Y')}) "
+        f"(pela data de pagamento ou, na ausência, pelo vencimento). "
+        f"Contas já pagas hoje aparecem como 'AGENDADO' para facilitar o controle de fluxo."
     )
 
     partes = []
@@ -341,42 +371,36 @@ def run_daily():
         send_email(f"[M15B3] Lembrete diário – {hoje.strftime('%d/%m/%Y')}", html)
         return
 
-    # --- Seleção de hoje e atrasadas ---
-    mask_hoje   = df["VECTO_DT"].dt.date == hoje
-    mask_atraso = df["VECTO_DT"].dt.date < hoje
+    # --- Contas do dia: DATA_REF == hoje (pagamento se existir, senão vencimento) ---
+    mask_dia = df["DATA_REF"].dt.date == hoje
+    df_hoje = df[mask_dia].copy()
 
-    # Hoje: consideramos TODAS as contas do dia, inclusive PAGO,
-    # porque para o e-mail elas serão tratadas como "agendadas".
-    df_hoje = df[mask_hoje].copy()
-
-    # Atrasadas: apenas as que ainda NÃO estão marcadas como PAGO
-    mask_nao_pago = df["STATUS"] != "PAGO"
-    df_atraso = df[mask_atraso & mask_nao_pago].copy()
+    # --- Contas atrasadas: vencimento < hoje E sem data de pagamento ---
+    mask_atraso = (df["VECTO_DT"].dt.date < hoje) & df["PGTO_DT"].isna()
+    df_atraso = df[mask_atraso].copy()
 
     # Ajustar STATUS de hoje: onde está PAGO, exibimos como AGENDADO
     if not df_hoje.empty and "STATUS" in df_hoje.columns:
         df_hoje.loc[df_hoje["STATUS"] == "PAGO", "STATUS"] = "AGENDADO"
 
-    df_hoje   = df_hoje.sort_values("VECTO_DT", ascending=True)
+    # Ordenações
+    df_hoje = df_hoje.sort_values("DATA_REF", ascending=True)
     df_atraso = df_atraso.sort_values("VECTO_DT", ascending=True)
 
-    print(f"[DEBUG] Linhas com VECTO_DT == hoje (qualquer status): {mask_hoje.sum()}")
-    print(f"[DEBUG] Linhas atrasadas (< hoje): {mask_atraso.sum()}")
-    print(f"[DEBUG] Linhas atrasadas ainda não pagas: {df_atraso.shape[0]}")
-    print(f"[DEBUG] Linhas de hoje (para e-mail): {df_hoje.shape[0]}")
+    print(f"[DEBUG] Linhas com DATA_REF == hoje: {mask_dia.sum()}")
+    print(f"[DEBUG] Linhas atrasadas (VECTO_DT < hoje e sem PGTO_DT): {df_atraso.shape[0]}")
 
     total_hoje = df_hoje["VALOR"].sum() if not df_hoje.empty else 0.0
     total_atraso = df_atraso["VALOR"].sum() if not df_atraso.empty else 0.0
 
-    # Valor das contas de hoje que já estão marcadas como PAGO na planilha
-    # (para devolver esse valor ao saldo e enxergar o pré-pagamento no e-mail)
-    total_pago_hoje = df[mask_hoje & (df["STATUS"] == "PAGO")]["VALOR"].sum()
+    # Valor das contas do dia que já estão marcadas como PAGO na planilha
+    total_pago_dia = df[mask_dia & (df["STATUS"] == "PAGO")]["VALOR"].sum()
     print(f"[DEBUG] Total contas de hoje (todas): {total_hoje}")
-    print(f"[DEBUG] Total contas atrasadas (não pagas): {total_atraso}")
-    print(f"[DEBUG] Total de hoje já marcadas como PAGO na planilha: {total_pago_hoje}")
+    print(f"[DEBUG] Total contas atrasadas (sem data de pgto): {total_atraso}")
+    print(f"[DEBUG] Total do dia já marcadas como PAGO na planilha: {total_pago_dia}")
 
-    saldo_ajustado = saldo_atual + total_pago_hoje
-    print(f"[DEBUG] Saldo ajustado para o e-mail (saldo_atual + pagos de hoje): {saldo_ajustado}")
+    saldo_ajustado = saldo_atual + total_pago_dia
+    print(f"[DEBUG] Saldo ajustado para o e-mail (saldo_atual + pagos do dia): {saldo_ajustado}")
 
     resumo = resumo_diario_html(saldo_ajustado, total_hoje, total_atraso)
     html = html_diario(hoje, df_hoje, df_atraso, resumo_html=resumo)
@@ -409,12 +433,14 @@ def run_weekly():
         )
         return
 
-    mask_periodo = (df["VECTO_DT"].dt.date >= sabado_anterior) & (df["VECTO_DT"].dt.date <= sexta_seguinte)
+    # Período definido pela DATA_REF (pgto se existir, senão vencimento),
+    # apenas contas que ainda não estão marcadas como PAGO.
+    mask_periodo = (df["DATA_REF"].dt.date >= sabado_anterior) & (df["DATA_REF"].dt.date <= sexta_seguinte)
     mask_status  = df["STATUS"] != "PAGO"
     alvo = df[mask_periodo & mask_status].copy()
-    alvo = alvo.sort_values("VECTO_DT", ascending=True)
+    alvo = alvo.sort_values("DATA_REF", ascending=True)
 
-    print(f"[DEBUG] Linhas no período sábado-sexta: {mask_periodo.sum()}")
+    print(f"[DEBUG] Linhas no período sábado-sexta (DATA_REF): {mask_periodo.sum()}")
     print(f"[DEBUG] Linhas com STATUS != 'PAGO': {mask_status.sum()}")
     print(f"[DEBUG] Linhas no alvo semanal: {alvo.shape[0]}")
 
@@ -422,8 +448,9 @@ def run_weekly():
     resumo = resumo_semanal_html(saldo_atual, total_periodo, sabado_anterior, sexta_seguinte)
 
     subt = (
-        f"Contas com vencimento de {sabado_anterior.strftime('%d/%m/%Y')} "
-        f"a {sexta_seguinte.strftime('%d/%m/%Y')} que ainda não estão marcadas como PAGO."
+        f"Contas com data de pagamento (ou vencimento, quando não houver) "
+        f"de {sabado_anterior.strftime('%d/%m/%Y')} a {sexta_seguinte.strftime('%d/%m/%Y')} "
+        f"que ainda não estão marcadas como PAGO."
     )
     html = html_lista("Lembrete semanal – agenda financeira", subt, alvo, extra_html=resumo)
     send_email(
