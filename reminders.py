@@ -137,13 +137,13 @@ def load_movbank() -> pd.DataFrame:
 
     df["VECTO_DT"] = pd.to_datetime("1899-12-30") + pd.to_timedelta(df["VECTO_NUM"], unit="D")
 
-    # --- Data de pagamento (data de pgto -> PGTO_DT) ---
-    if "data de pgto" in df.columns:
-        df["PGTO_NUM"] = pd.to_numeric(df["data de pgto"], errors="coerce")
+    # --- Data de pagamento (DATA DE PGTO -> PGTO_DT) ---
+    if "DATA DE PGTO" in df.columns:
+        df["PGTO_NUM"] = pd.to_numeric(df["DATA DE PGTO"], errors="coerce")
         mask_pg_na = df["PGTO_NUM"].isna()
         if mask_pg_na.any():
-            print(f"[DEBUG] {mask_pg_na.sum()} linhas com 'data de pgto' não numérica, tentando parse de texto...")
-            dt_pg_txt = pd.to_datetime(df.loc[mask_pg_na, "data de pgto"], dayfirst=True, errors="coerce")
+            print(f"[DEBUG] {mask_pg_na.sum()} linhas com 'DATA DE PGTO' não numérica, tentando parse de texto...")
+            dt_pg_txt = pd.to_datetime(df.loc[mask_pg_na, "DATA DE PGTO"], dayfirst=True, errors="coerce")
             num_from_txt_pg = (dt_pg_txt - pd.to_datetime("1899-12-30")).dt.days
             df.loc[mask_pg_na, "PGTO_NUM"] = num_from_txt_pg
 
@@ -157,7 +157,7 @@ def load_movbank() -> pd.DataFrame:
 
     try:
         print("[DEBUG] Amostra VECTO / VECTO_DT / PGTO_DT / DATA_REF / STATUS:")
-        print(df[["VECTO", "VECTO_DT", "data de pgto", "PGTO_DT", "DATA_REF", "STATUS"]].head(10))
+        print(df[["VECTO", "VECTO_DT", "DATA DE PGTO", "PGTO_DT", "DATA_REF", "STATUS"]].head(10))
         print("[DEBUG] Intervalo de VECTO_DT:",
               df["VECTO_DT"].min(), "->", df["VECTO_DT"].max())
         print("[DEBUG] Intervalo de DATA_REF:",
@@ -396,7 +396,7 @@ def run_daily():
     # Valor das contas do dia que já estão marcadas como PAGO na planilha
     total_pago_dia = df[mask_dia & (df["STATUS"] == "PAGO")]["VALOR"].sum()
     print(f"[DEBUG] Total contas de hoje (todas): {total_hoje}")
-    print(f"[DEBUG] Total contas atrasadas (sem data de pgto): {total_atraso}")
+    print(f"[DEBUG] Total contas atrasadas (sem DATA DE PGTO): {total_atraso}")
     print(f"[DEBUG] Total do dia já marcadas como PAGO na planilha: {total_pago_dia}")
 
     saldo_ajustado = saldo_atual + total_pago_dia
