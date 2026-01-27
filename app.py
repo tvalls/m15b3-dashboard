@@ -161,7 +161,7 @@ def load_all():
 def login():
     st.markdown(STYLE, unsafe_allow_html=True)
     st.markdown(
-        '<div class="logo-container"><img src="https://www.elloconsultoria.com.br/LOGO-SEM%20FUNDO-PARA%20FUNDO%20CLARO.png"></div>',
+        '<div class="logo-container"><img src="/logo.png"></div>',
         unsafe_allow_html=True,
     )
     st.markdown("<h1>🔐 Acesso ao Painel Financeiro</h1>", unsafe_allow_html=True)
