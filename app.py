@@ -161,7 +161,7 @@ def load_all():
 def login():
     st.markdown(STYLE, unsafe_allow_html=True)
     st.markdown(
-        '<div class="logo-container"><img src="/logo.png"></div>',
+        '<div class="logo-container"><img src="https://www.elloconsultoria.com.br/logo.png"></div>',
         unsafe_allow_html=True,
     )
     st.markdown("<h1>🔐 Acesso ao Painel Financeiro</h1>", unsafe_allow_html=True)
@@ -181,7 +181,7 @@ def login():
 def dashboard():
     st.markdown(STYLE, unsafe_allow_html=True)
     st.markdown(
-        '<div class="logo-container"><img src="https://www.elloconsultoria.com.br/LOGO-SEM%20FUNDO-PARA%20FUNDO%20CLARO.png"></div>',
+        '<div class="logo-container"><img src="https://www.elloconsultoria.com.br/logo.png"></div>',
         unsafe_allow_html=True,
     )
     st.markdown("<h1>Painel Financeiro SPE M15B3</h1>", unsafe_allow_html=True)
@@ -190,7 +190,7 @@ def dashboard():
     # Loader
     loader_html = """
     <div class="loader-container">
-        <div class="loader-icon">🔄</div>
+        <div class="loader-icon">🔅</div>
         <h3>Carregando dados...</h3>
     </div>
     """
