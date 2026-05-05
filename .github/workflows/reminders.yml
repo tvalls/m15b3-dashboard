@@ -3,7 +3,7 @@ name: Finance reminders
 on:
   schedule:
     # roda todo dia às 08:05 (BRT) -> 11:05 UTC
-    - cron: "5 11 * * *"
+    - cron: "5 09 * * *"
   workflow_dispatch: {}
 
 permissions:
